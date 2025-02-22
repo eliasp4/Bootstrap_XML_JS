@@ -50,14 +50,17 @@ function validateFeed(xmlDoc) {
 let allEntries = []; // Almacena todas las entradas
 let currentPage = 1; // Página actual
 const entriesPerPage = 10; // Número de entradas por página
+let currentEntries = []; // Almacena las entradas mostradas actualmente
 
 function processAtomFeed(xmlDoc) {
     console.log("Procesando feed...");
     allEntries = $(xmlDoc).find('item, entry').toArray(); // Almacena todas las entradas
-    renderPage(currentPage); // Renderiza la página inicial
+    currentEntries = allEntries; // Inicialmente, todas las entradas son las mostradas
+    renderPage(currentPage, currentEntries); // Renderiza la página inicial con todas las entradas
+    showTitleSearch();
 }
 
-function renderPage(page, entries = allEntries) {
+function renderPage(page, entries = currentEntries) {
     const start = (page - 1) * entriesPerPage;
     const end = start + entriesPerPage;
     const entriesToShow = entries.slice(start, end);
@@ -69,7 +72,10 @@ function renderPage(page, entries = allEntries) {
         const title = $(entry).find('title').text();
         const link = $(entry).find('link').text() || $(entry).find('link').attr('href');
         const description = $(entry).find('description, summary').text();
-        const author = $(entry).find('author, creator').text() || 'Autor desconocido';
+        
+        // Try to extract the author/creator
+        let author = $(entry).find('dc\\:creator').text() || $(entry).find('creator').text() || 'Autor desconocido';
+        
         const pubDate = new Date($(entry).find('pubDate, published').text()).toLocaleString();
         
         let image =
@@ -105,9 +111,9 @@ function renderPage(page, entries = allEntries) {
                         <h6 class="card-subtitle mb-2 text-muted">${author} - ${pubDate}</h6>
                         <p class="card-text">${description.substring(0, 100)}...</p>
                         <div class="mb-2">${categoryHtml}</div>
-                        <a href="${link}" class="btn btn-primary" target="_blank">Leer más</a>
-                        <button class="btn btn-outline-warning favorite-btn ${isFavorite ? 'active' : ''}" data-id="${id}">
-                            <i class="bi bi-star ${isFavorite ? 'bi-star-fill' : ''}"></i>
+                        <a href="${link}" class="btn btn-primary custom-read-more-btn" target="_blank">Leer más</a>
+                        <button class="btn favorite-btn ${isFavorite ? 'active' : ''}" data-id="${id}">
+                            <i class="bi ${isFavorite ? 'bi-star-fill' : 'bi-star'}"></i>
                         </button>
                     </div>
                 </div>
@@ -147,47 +153,46 @@ function updatePagination(totalEntries) {
 function changePage(e) {
     e.preventDefault();
     const newPage = $(this).data('page');
-    if (newPage >= 1 && newPage <= Math.ceil(allEntries.length / entriesPerPage)) {
+    if (newPage >= 1 && newPage <= Math.ceil(currentEntries.length / entriesPerPage)) { // Usa currentEntries
         currentPage = newPage;
-        renderPage(currentPage);
+        renderPage(currentPage, currentEntries); // Pasa currentEntries a renderPage
     }
 }
 
 $(document).on('click', '.page-link', function(e) {
     e.preventDefault();
-    currentPage = $(this).data('page'); // Actualiza la página actual
-    renderPage(currentPage); // Renderiza la nueva página
+    currentPage = $(this).data('page');
+    renderPage(currentPage, currentEntries); // Pasa currentEntries a renderPage
 });
 
 $(document).on('click', '.favorite-btn', function() {
-    const $btn = $(this);
-    const newsId = $btn.data('id');
+    let $btn = $(this);
+    let id = $btn.data('id');
+    let isFavorite = $btn.hasClass('active');
     
-    $btn.toggleClass('active');
-    $btn.find('i').toggleClass('bi-star-fill');
-
-    // Guardar en localStorage
-    const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
-    
-    if ($btn.hasClass('active')) {
-        favorites.push(newsId);
+    if (isFavorite) {
+        // Quitar de favoritos
+        $btn.removeClass('active');
+        $btn.find('i').removeClass('bi-star-fill').addClass('bi-star');
+        // Aquí tu lógica para quitar de favoritos
     } else {
-        const index = favorites.indexOf(newsId);
-        if (index > -1) favorites.splice(index, 1);
+        // Añadir a favoritos
+        $btn.addClass('active');
+        $btn.find('i').removeClass('bi-star').addClass('bi-star-fill');
+        // Aquí tu lógica para añadir a favoritos
     }
-    
-    localStorage.setItem('favorites', JSON.stringify(favorites));
 });
+
 
 $('#favorites-btn').click(function() {
     const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
 
-    // Filtrar todas las entradas favoritas
     const favoriteEntries = allEntries.filter(entry => favorites.includes(`news-${allEntries.indexOf(entry)}`));
 
     if (favoriteEntries.length > 0) {
-        currentPage = 1; // Reiniciar a la primera página
-        renderFavoritePage(favoriteEntries); // Renderizar solo los favoritos
+        currentPage = 1;
+        currentEntries = favoriteEntries; // Actualiza currentEntries con los favoritos
+        renderPage(currentPage, currentEntries);
     } else {
         alert('No hay favoritos guardados.');
     }
@@ -200,7 +205,8 @@ function renderFavoritePage(favoriteEntries) {
         const title = $(entry).find('title').text();
         const link = $(entry).find('link').text() || $(entry).find('link').attr('href');
         const description = $(entry).find('description, summary').text();
-        const author = $(entry).find('author, creator').text() || 'Autor desconocido';
+                // Try to extract the author/creator
+        let author = $(entry).find('dc\\:creator').text() || $(entry).find('creator').text() || 'Autor desconocido';
         const pubDate = new Date($(entry).find('pubDate, published').text()).toLocaleString();
         
         let image =
@@ -221,29 +227,52 @@ function renderFavoritePage(favoriteEntries) {
         ).join('');
 
         newsHtml += `
-            <div class="col-md-4 mb-4">
-                <div class="card h-100">
-                    <img 
-                        src="${image}" 
-                        class="card-img-top" 
-                        alt="${title}" 
-                        style="max-height: 200px; object-fit: cover;"
-                        onerror="this.onerror=null; this.src='https://via.placeholder.com/300x200';"
-                    >
-                    <div class="card-body">
-                        <h5 class="card-title">${title}</h5>
-                        <h6 class="card-subtitle mb-2 text-muted">${author} - ${pubDate}</h6>
-                        <p class="card-text">${description.substring(0, 100)}...</p>
-                        <div class="mb-2">${categoryHtml}</div>
-                        <a href="${link}" class="btn btn-primary" target="_blank">Leer más</a>
-                        <button class="btn btn-outline-warning favorite-btn active" data-id="${id}">
-                            <i class="bi bi-star bi-star-fill"></i>
-                        </button>
-                    </div>
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <img 
+                    src="${image}" 
+                    class="card-img-top" 
+                    alt="${title}" 
+                    style="max-height: 200px; object-fit: cover;"
+                    onerror="this.onerror=null; this.src='https://via.placeholder.com/300x200';"
+                >
+                <div class="card-body">
+                    <h5 class="card-title">${title}</h5>
+                    <h6 class="card-subtitle mb-2 text-muted">${author} - ${pubDate}</h6>
+                    <p class="card-text">${description.substring(0, 100)}...</p>
+                    <div class="mb-2">${categoryHtml}</div>
+                    <a href="${link}" class="btn custom-read-more-btn" target="_blank">Leer más</a>
+                    <button class="btn favorite-btn ${isFavorite ? 'active' : ''}" data-id="${id}">
+                            <i class="bi ${isFavorite ? 'bi-star-fill' : 'bi-star'}"></i>
+                    </button>
                 </div>
             </div>
-        `;
+        </div>
+    `;
     });
 
     $('#news-container').html(newsHtml);
+    updatePagination(favoriteEntries.length);
 }
+
+function showTitleSearch() {
+    $('#title-search-container').fadeIn();
+}
+
+function filterTitles(searchText) {
+    const filteredEntries = allEntries.filter(entry => {
+        const title = $(entry).find('title').text().toLowerCase();
+        return title.includes(searchText);
+    });
+
+    currentPage = 1; // Reset to the first page
+    currentEntries = filteredEntries; // Update currentEntries with filtered results
+    renderPage(currentPage, currentEntries); // Render with filtered results
+}
+
+$(document).ready(function() {
+    $('#title-search').on('keyup', function() {
+        const searchText = $(this).val().toLowerCase();
+        filterTitles(searchText);
+    });
+});
